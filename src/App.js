@@ -1,24 +1,48 @@
-import logo from './logo.svg';
-import './App.css';
+// src/App.js
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import UploadEmails from './pages/UploadEmails';
+import Seed from './pages/Seed';
+import { db } from './firebase/config';
+import { doc, setDoc } from 'firebase/firestore';
 
 function App() {
+  useEffect(() => {
+    const uploadApprovedEmails = async () => {
+      try {
+        const response = await fetch('/approvedEmails.txt');
+        const text = await response.text();
+
+        const emails = text
+          .split('\n')
+          .map(e => e.trim())
+          .filter(e => e.length > 0 && e.includes('@'));
+
+        for (const email of emails) {
+          const docRef = doc(db, 'approvedStudents', email);
+          await setDoc(docRef, { email });
+        }
+
+        console.log('✅ Approved emails uploaded successfully');
+      } catch (error) {
+        console.error('❌ Failed to upload emails:', error);
+      }
+    };
+
+    uploadApprovedEmails();
+  }, []);
+
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Login />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/upload-emails" element={<UploadEmails />} />
+        <Route path="/seed" element={<Seed />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 

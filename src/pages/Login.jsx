@@ -17,47 +17,81 @@ function Login() {
       const docRef = doc(db, 'approvedStudents', email);
       const docSnap = await getDoc(docRef);
 
-      if (docSnap.exists()) {
-        localStorage.setItem('email', email);
-        navigate('/dashboard');
-      } else {
-        setError('❌ You are not approved to login.');
+      if (!docSnap.exists()) {
+        setError("You are not approved to log in.");
+        return;
       }
+
+      // ✅ Proceed to dashboard with email
+      navigate('/dashboard', { state: { email } });
+
     } catch (err) {
-      setError('❌ Something went wrong. Check console.');
-      console.error(err);
+      setError("Something went wrong during login.");
+      console.error("Login Error:", err);
     }
   };
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      marginTop: '100px',
-    }}>
-      <h2>🎉 Congratulations on clearing the test!</h2>
-      <p>Let’s move to the next round.</p>
-      <form onSubmit={handleLogin} style={{ marginTop: '20px' }}>
-        <input
-          type="email"
-          placeholder="Enter your email"
-          value={email}
-          required
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ padding: '10px', fontSize: '16px', width: '250px' }}
-        />
-        <br /><br />
-        <button
-          type="submit"
-          style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer' }}
-        >
-          Login
-        </button>
-      </form>
-      {error && <p style={{ color: 'red', marginTop: '20px' }}>{error}</p>}
+    <div style={styles.container}>
+      <div style={styles.card}>
+        <h2>🎉 Congratulations on clearing the test!</h2>
+        <p style={{ marginBottom: '20px' }}>Let’s move to the next round now.</p>
+        <form onSubmit={handleLogin}>
+          <input
+            type="email"
+            placeholder="Enter your approved email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            style={styles.input}
+          />
+          <button type="submit" style={styles.button}>Login</button>
+        </form>
+        {error && <p style={styles.error}>{error}</p>}
+      </div>
     </div>
   );
 }
+
+const styles = {
+  container: {
+    minHeight: '100vh',
+    backgroundColor: '#f3f3ff',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    fontFamily: 'sans-serif'
+  },
+  card: {
+    backgroundColor: '#fff',
+    padding: '30px',
+    borderRadius: '12px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+    textAlign: 'center',
+    width: '90%',
+    maxWidth: '400px'
+  },
+  input: {
+    width: '100%',
+    padding: '12px',
+    fontSize: '16px',
+    marginBottom: '10px',
+    borderRadius: '6px',
+    border: '1px solid #ccc'
+  },
+  button: {
+    padding: '10px 20px',
+    backgroundColor: '#4CAF50',
+    color: '#fff',
+    fontSize: '16px',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer'
+  },
+  error: {
+    color: 'red',
+    marginTop: '10px'
+  }
+};
 
 export default Login;

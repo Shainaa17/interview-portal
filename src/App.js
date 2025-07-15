@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import UploadEmails from './pages/UploadEmails';
-import Seed from './pages/Seed';
+
 import { db } from './firebase/config';
 import { doc, setDoc } from 'firebase/firestore';
 import Admin from './pages/Admin';
@@ -45,7 +45,6 @@ function App() {
         <Route path="/" element={<Login />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/upload-emails" element={<UploadEmails />} />
-        <Route path="/seed" element={<Seed />} />
         <Route path="/admin" element={<Admin />} />
       </Routes>
     </BrowserRouter>

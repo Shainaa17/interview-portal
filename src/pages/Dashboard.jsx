@@ -1,7 +1,15 @@
 // src/pages/Dashboard.jsx
 import React, { useEffect, useState } from 'react';
 import { db } from '../firebase/config';
-import { collection, getDocs, updateDoc, doc } from 'firebase/firestore';
+import {
+  collection,
+  getDocs,
+  updateDoc,
+  doc,
+  addDoc,
+  query,
+  orderBy
+} from 'firebase/firestore';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -19,16 +27,34 @@ function Dashboard() {
   const [bookedSlot, setBookedSlot] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!email) {
-      navigate('/'); // Redirect to login if email is missing
+  // 🟢 SEED ONLY IF NO SLOTS EXIST
+  const seedSlotsIfNotPresent = async () => {
+    const slotsRef = collection(db, 'slots');
+    const snapshot = await getDocs(slotsRef);
+
+    if (!snapshot.empty) {
+      console.log('⚠️ Slots already exist. Skipping seeding.');
       return;
     }
-    fetchSlots();
-  }, [email]);
+
+    for (const day of days) {
+      for (const time of timeSlots) {
+        await addDoc(slotsRef, {
+          day,
+          time,
+          seatsLeft: 5,
+          bookedBy: [],
+        });
+      }
+    }
+
+    console.log('✅ Seeded slots successfully.');
+  };
 
   const fetchSlots = async () => {
-    const snapshot = await getDocs(collection(db, 'slots'));
+    const slotsRef = collection(db, 'slots');
+    const snapshot = await getDocs(slotsRef);
+
     const slotList = [];
     let userBooked = null;
 
@@ -40,6 +66,13 @@ function Dashboard() {
       slotList.push({ id: docSnap.id, ...data });
     });
 
+    // Sort by day and time
+    slotList.sort((a, b) => {
+      const dayDiff = days.indexOf(a.day) - days.indexOf(b.day);
+      if (dayDiff !== 0) return dayDiff;
+      return timeSlots.indexOf(a.time) - timeSlots.indexOf(b.time);
+    });
+
     setBookedSlot(userBooked);
     setSlots(slotList);
     setLoading(false);
@@ -49,10 +82,10 @@ function Dashboard() {
     if (!email || bookedSlot) return;
 
     const slotRef = doc(db, 'slots', slotId);
-    const slotSnap = await getDocs(collection(db, 'slots'));
-    let selectedSlot;
+    const snapshot = await getDocs(collection(db, 'slots'));
 
-    slotSnap.forEach((docSnap) => {
+    let selectedSlot;
+    snapshot.forEach((docSnap) => {
       if (docSnap.id === slotId) {
         selectedSlot = docSnap.data();
       }
@@ -61,12 +94,24 @@ function Dashboard() {
     if (selectedSlot?.seatsLeft > 0) {
       await updateDoc(slotRef, {
         seatsLeft: selectedSlot.seatsLeft - 1,
-        bookedBy: [...selectedSlot.bookedBy, email]
+        bookedBy: [...selectedSlot.bookedBy, email],
       });
       setBookedSlot(slotId);
       fetchSlots();
     }
   };
+
+  useEffect(() => {
+    if (!email) {
+      navigate('/');
+      return;
+    }
+    const init = async () => {
+      await seedSlotsIfNotPresent();
+      await fetchSlots();
+    };
+    init();
+  }, [email]);
 
   if (loading) return <p style={{ textAlign: 'center' }}>⏳ Loading...</p>;
 
@@ -89,7 +134,7 @@ function Dashboard() {
         </div>
       ) : (
         <>
-          <h2>Book Your Interview Slot</h2>
+          <h2 style={{ textAlign: 'center' }}>Book Your Interview Slot</h2>
           {days.map((day) => (
             <div key={day}>
               <h3>{day}</h3>

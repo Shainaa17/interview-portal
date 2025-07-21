@@ -1,6 +1,6 @@
 // src/pages/Dashboard.jsx
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { db } from '../firebase/config';
 import {
   collection,
@@ -26,8 +26,8 @@ function Dashboard() {
   const [bookedSlot, setBookedSlot] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Seed any missing slots
-  const seedSlotsIfNotPresent = async () => {
+   // Seed any missing slots
+  const seedSlotsIfNotPresent = useCallback(async () => {
     const slotsRef = collection(db, 'slots');
     const snapshot = await getDocs(slotsRef);
 
@@ -50,12 +50,10 @@ function Dashboard() {
         }
       }
     }
-
     console.log('✅ All slots ensured.');
-  };
-
-  // Fetch all slots and find if this user is already booked
-  const fetchSlots = async () => {
+  }, []);
+   // Fetch all slots and find if this user is already booked
+  const fetchSlots = useCallback(async () => {
     const slotsRef = collection(db, 'slots');
     const snapshot = await getDocs(slotsRef);
 
@@ -69,8 +67,7 @@ function Dashboard() {
       }
       slotList.push({ id: docSnap.id, ...data });
     });
-
-    // Sort by day then time
+// Sort by day then time
     slotList.sort((a, b) => {
       const dayDiff = days.indexOf(a.day) - days.indexOf(b.day);
       if (dayDiff !== 0) return dayDiff;
@@ -80,9 +77,8 @@ function Dashboard() {
     setBookedSlot(userBooked);
     setSlots(slotList);
     setLoading(false);
-  };
-
-  // Booking logic
+  }, [email]);
+// Booking logic
   const handleBooking = async (slotId) => {
     if (!email || bookedSlot) return;
 
@@ -119,7 +115,7 @@ function Dashboard() {
     };
 
     init();
-  }, [email]);
+  }, [email, navigate, fetchSlots, seedSlotsIfNotPresent]);
 
   if (loading) return <p style={{ textAlign: 'center' }}>⏳ Loading...</p>;
 

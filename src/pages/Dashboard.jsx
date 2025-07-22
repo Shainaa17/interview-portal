@@ -1,184 +1,389 @@
-// src/pages/Dashboard.jsx
+import React, { useEffect, useState } from "react";
+import { db } from "../firebase/config"; // Ensure this path is correct
+import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
+import "../App.css"; // Ensure you have this file for your CSS
 
-import React, { useEffect, useState, useCallback } from 'react';
-import { db } from '../firebase/config';
-import {
-  collection,
-  getDocs,
-  updateDoc,
-  doc,
-  addDoc
-} from 'firebase/firestore';
-import { useLocation, useNavigate } from 'react-router-dom';
-
-const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-const timeSlots = [
-  '5:30–6:00', '6:00–6:30', '6:30–7:00',
-  '7:00–7:30', '7:30–8:00', '8:00–8:30'
-];
-
-function Dashboard() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const email = location.state?.email;
-
-  const [slots, setSlots] = useState([]);
-  const [bookedSlot, setBookedSlot] = useState(null);
+const Dashboard = () => {
+  const [currentDayIndex, setCurrentDayIndex] = useState(0);
+  const [allIndividualSlotsData, setAllIndividualSlotsData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [bookingMessage, setBookingMessage] = useState("");
+  // New state to control showing the confirmation card
+  const [showConfirmationCard, setShowConfirmationCard] = useState(false);
+  // New state to store details for the confirmation card
+  const [bookedSlotDetails, setBookedSlotDetails] = useState(null);
 
-   // Seed any missing slots
-  const seedSlotsIfNotPresent = useCallback(async () => {
-    const slotsRef = collection(db, 'slots');
-    const snapshot = await getDocs(slotsRef);
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+  // This array MUST EXACTLY match the 'time' strings in your Firebase documents
+  const slotTimings = ["5:30-6:00", "6:00-6:30", "6:30-7:00", "7:00-7:30", "7:30-8:00", "8:00-8:30"];
 
-    const existing = new Set();
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      existing.add(`${data.day}-${data.time}`);
-    });
-
-    for (const day of days) {
-      for (const time of timeSlots) {
-        const key = `${day}-${time}`;
-        if (!existing.has(key)) {
-          await addDoc(slotsRef, {
-            day,
-            time,
-            seatsLeft: 5,
-            bookedBy: [],
-          });
-        }
-      }
-    }
-    console.log('✅ All slots ensured.');
-  }, []);
-   // Fetch all slots and find if this user is already booked
-  const fetchSlots = useCallback(async () => {
-    const slotsRef = collection(db, 'slots');
-    const snapshot = await getDocs(slotsRef);
-
-    const slotList = [];
-    let userBooked = null;
-
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      if (data.bookedBy?.includes(email)) {
-        userBooked = docSnap.id;
-      }
-      slotList.push({ id: docSnap.id, ...data });
-    });
-// Sort by day then time
-    slotList.sort((a, b) => {
-      const dayDiff = days.indexOf(a.day) - days.indexOf(b.day);
-      if (dayDiff !== 0) return dayDiff;
-      return timeSlots.indexOf(a.time) - timeSlots.indexOf(b.time);
-    });
-
-    setBookedSlot(userBooked);
-    setSlots(slotList);
-    setLoading(false);
-  }, [email]);
-// Booking logic
-  const handleBooking = async (slotId) => {
-    if (!email || bookedSlot) return;
-
-    const slotRef = doc(db, 'slots', slotId);
-    const snapshot = await getDocs(collection(db, 'slots'));
-
-    let selectedSlot = null;
-    snapshot.forEach((docSnap) => {
-      if (docSnap.id === slotId) {
-        selectedSlot = docSnap.data();
-      }
-    });
-
-    if (selectedSlot?.seatsLeft > 0 && !selectedSlot.bookedBy.includes(email)) {
-      await updateDoc(slotRef, {
-        seatsLeft: selectedSlot.seatsLeft - 1,
-        bookedBy: [...selectedSlot.bookedBy, email],
-      });
-
-      setBookedSlot(slotId);
-      await fetchSlots(); // refresh
+  const fetchAllSlots = async () => {
+    setLoading(true);
+    try {
+      const slotsCollection = collection(db, "slots");
+      const slotsSnapshot = await getDocs(slotsCollection);
+      const slots = slotsSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setAllIndividualSlotsData(slots);
+      setLoading(false);
+      // console.log("Fetched all slots data:", slots); // Debug log
+    } catch (error) {
+      console.error("Error fetching slots:", error);
+      setLoading(false);
+      setBookingMessage("Failed to load slots. Please try again.");
     }
   };
 
   useEffect(() => {
-    if (!email) {
-      navigate('/');
+    fetchAllSlots();
+  }, []);
+
+  const handlePrevious = () => {
+    setCurrentDayIndex((prev) => (prev > 0 ? prev - 1 : days.length - 1));
+    setBookingMessage("");
+  };
+
+  const handleNext = () => {
+    setCurrentDayIndex((prev) => (prev < days.length - 1 ? prev + 1 : 0));
+    setBookingMessage("");
+  };
+
+  const currentDay = days[currentDayIndex];
+
+  const currentDaySpecificSlots = allIndividualSlotsData.filter(
+    (slot) => slot.day === currentDay
+  );
+
+  const handleBookSlot = async (slotDocId, time, currentSeatsLeft) => {
+    if (currentSeatsLeft <= 0) {
+      setBookingMessage("No seats available for this slot.");
       return;
     }
 
-    const init = async () => {
-      await seedSlotsIfNotPresent();
-      await fetchSlots();
-    };
+    const confirmBooking = window.confirm(
+      `Are you sure you want to book the ${time} slot on ${currentDay}?`
+    );
 
-    init();
-  }, [email, navigate, fetchSlots, seedSlotsIfNotPresent]);
+    if (!confirmBooking) {
+      return;
+    }
 
-  if (loading) return <p style={{ textAlign: 'center' }}>⏳ Loading...</p>;
+    setBookingMessage("Booking your slot...");
 
-  return (
-    <div style={{ padding: '30px' }}>
-      {bookedSlot ? (
-        <div style={{
-          border: '2px solid green',
-          padding: '20px',
-          maxWidth: '400px',
-          margin: '0 auto',
-          borderRadius: '8px',
-          textAlign: 'center',
-          backgroundColor: '#e6ffe6'
-        }}>
-          <h3>✅ Thank you for registering!</h3>
-          <p><strong>Day:</strong> {slots.find(s => s.id === bookedSlot)?.day}</p>
-          <p><strong>Time:</strong> {slots.find(s => s.id === bookedSlot)?.time}</p>
-          <p>We look forward to seeing you 🎉</p>
+    try {
+      const slotDocRef = doc(db, "slots", slotDocId);
+      const newSeatCount = currentSeatsLeft - 1;
+
+      await updateDoc(slotDocRef, {
+        seatsLeft: newSeatCount,
+        // You might add bookedBy: "user_id_here" if you have user authentication
+      });
+
+      setAllIndividualSlotsData((prevSlotsData) =>
+        prevSlotsData.map((slot) =>
+          slot.id === slotDocId
+            ? { ...slot, seatsLeft: newSeatCount }
+            : slot
+        )
+      );
+
+      // Successfully booked: Set details for confirmation card and show it
+      setBookedSlotDetails({
+        day: currentDay,
+        time: time,
+        seatsRemaining: newSeatCount, // Seats remaining in that slot
+        // You can add more details here if available, e.g., user name, booking ID
+      });
+      setShowConfirmationCard(true); // Show the confirmation card
+      setBookingMessage(""); // Clear general booking message
+
+    } catch (error) {
+      console.error("Error booking slot:", error);
+      setBookingMessage("Error booking slot. Please try again.");
+      setBookedSlotDetails(null); // Clear details if booking failed
+      setShowConfirmationCard(false); // Make sure confirmation card is not shown
+    }
+  };
+
+  // Removed handleBookAnotherSlot function as it's not needed for the confirmation card
+  // if the user can't go back.
+
+  // --- Confirmation Card Component ---
+  const ConfirmationCard = ({ details }) => { // onBookAnother prop removed
+    if (!details) return null; // Don't render if no details
+
+    return (
+      <div className="card confirmation-card">
+        <h2 className="title">Booking Confirmed!</h2>
+        <p>Thank you for booking your slot.</p>
+        <div className="booking-details">
+          <p><strong>Date:</strong> {details.day}</p>
+          <p><strong>Time:</strong> {details.time}</p>
+          <p><strong>Seats Remaining:</strong> {details.seatsRemaining}</p>
         </div>
-      ) : (
-        <>
-          <h2 style={{ textAlign: 'center' }}>Book Your Interview Slot</h2>
-          {days.map((day) => {
-            const slotsForDay = slots.filter(s => s.day === day);
-            return (
-              <div key={day}>
-                <h3>{day}</h3>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                  {timeSlots.map((time) => {
-                    const slot = slotsForDay.find(s => s.time === time);
-                    if (!slot) return null;
+        <p className="note-screenshot">
+          <span className="warning">⚠️ Note:</span> Please take a screenshot of this confirmation for your records.
+        </p>
+        {/* "Book Another Slot" button removed as per requirement */}
+      </div>
+    );
+  };
 
-                    return (
-                      <div key={time}
-                        style={{
-                          border: '1px solid #ccc',
-                          padding: '10px',
-                          borderRadius: '5px',
-                          width: '160px',
-                          background: slot.seatsLeft === 0 ? '#f8d7da' : '#fff',
-                          textAlign: 'center'
-                        }}
+  // --- Main Dashboard Render ---
+  return (
+    <div className="container">
+      {/* Conditional rendering based on showConfirmationCard state */}
+      {showConfirmationCard ? (
+        <ConfirmationCard details={bookedSlotDetails} /> // onBookAnother prop removed
+      ) : (
+        <> {/* Fragment for multiple elements */}
+          <h1 className="title">Please Book Your Interview Slot</h1>
+          <div className="card">
+            <div className="card-header">
+              {/* Keep navigation buttons */}
+              <button onClick={handlePrevious}>&larr;</button>
+              <h2>{currentDay}</h2>
+              <button onClick={handleNext}>&rarr;</button>
+            </div>
+            <div className="slots">
+              {loading ? (
+                <p>Loading...</p>
+              ) : currentDaySpecificSlots.length > 0 ? (
+                slotTimings.map((time, index) => {
+                  const specificSlot = currentDaySpecificSlots.find(
+                    (s) => {
+                      const normalizedFirebaseTime = s.time.replace(/–|—/g, '-');
+                      return normalizedFirebaseTime === time;
+                    }
+                  );
+
+                  const seatsAvailable = specificSlot ? specificSlot.seatsLeft : "N/A";
+                  const isBookedOut = seatsAvailable === 0;
+
+                  return (
+                    <div
+                      className={`slot ${isBookedOut ? "booked-out" : ""}`}
+                      key={time}
+                    >
+                      <span>{time}</span>
+                      <span>{seatsAvailable} seats</span>
+                      <button
+                        onClick={() =>
+                          handleBookSlot(
+                            specificSlot?.id,
+                            time,
+                            seatsAvailable
+                          )
+                        }
+                        disabled={isBookedOut || !specificSlot || seatsAvailable === "N/A"}
+                        className="book-button"
                       >
-                        <p><strong>{time}</strong></p>
-                        <p>{slot.seatsLeft} seats remaining</p>
-                        <button
-                          onClick={() => handleBooking(slot.id)}
-                          disabled={slot.seatsLeft === 0 || bookedSlot !== null}
-                        >
-                          Book
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
+                        {isBookedOut ? "Booked Out" : "Book Now"}
+                      </button>
+                    </div>
+                  );
+                })
+              ) : (
+                <p>No slots available for {currentDay}</p>
+              )}
+            </div>
+          </div>
+          {bookingMessage && <p className="booking-message">{bookingMessage}</p>}
+          <p className="warning">⚠️ Warning: Slot once booked cannot be changed</p>
         </>
       )}
+
+      {/* Inline styles. Consider moving these to App.css for better separation of concerns. */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&display=swap');
+
+        .container {
+          font-family: 'Poppins', sans-serif;
+          background: linear-gradient(to bottom right, #dbeafe, #eff6ff);
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          padding: 2rem;
+          box-sizing: border-box;
+        }
+
+        .title {
+          font-size: 2rem;
+          margin-bottom: 1.5rem;
+          color: #1e3a8a;
+          text-shadow: 1px 1px 2px #60a5fa;
+        }
+
+        .card {
+          background: white;
+          padding: 2rem;
+          border-radius: 15px;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+          max-width: 400px;
+          width: 100%;
+          animation: fadeIn 0.5s ease-in-out;
+          text-align: center; /* Center content in the card */
+        }
+
+        .card-header {
+          display: flex;
+          justify-content: space-between; /* Keep spacing for navigation buttons */
+          align-items: center;
+          margin-bottom: 1rem;
+        }
+
+        .card-header h2 {
+          margin: 0;
+          color: #1d4ed8;
+        }
+
+        .card-header button {
+          background: #1d4ed8;
+          color: white;
+          border: none;
+          border-radius: 50%;
+          padding: 0.5rem 0.8rem;
+          cursor: pointer;
+          font-size: 1rem;
+          transition: transform 0.2s ease;
+        }
+
+        .card-header button:hover {
+          transform: scale(1.1);
+        }
+
+        .slots {
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
+        }
+
+        .slot {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 0.5rem 1rem;
+          background: #e0f2fe;
+          border-radius: 10px;
+          box-shadow: inset 0 0 10px #bae6fd;
+          transition: background 0.3s ease;
+        }
+
+        .slot.booked-out {
+            background: #fecaca; /* Light red for booked out slots */
+            color: #b91c1c;
+        }
+
+        .slot span {
+            flex-grow: 1;
+        }
+
+        .book-button {
+            background: #22c55e; /* Green for book button */
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+            margin-left: 1rem;
+        }
+
+        .book-button:hover:not(:disabled) {
+            background: #16a34a; /* Darker green on hover */
+        }
+
+        .book-button:disabled {
+            background: #9ca3af; /* Grey for disabled button */
+            cursor: not-allowed;
+        }
+
+        .warning {
+          margin-top: 2rem;
+          color: #b91c1c;
+          font-weight: 500;
+          text-align: center;
+        }
+
+        .booking-message {
+            margin-top: 1rem;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 500;
+            text-align: center;
+            background-color: #dbeafe;
+            color: #1e3a8a;
+        }
+
+        /* Styles for the new confirmation card */
+        .confirmation-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 300px; /* Give it some height */
+        }
+
+        .confirmation-card .title {
+            color: #22c55e; /* Green for success */
+            font-size: 2.2rem;
+            margin-bottom: 1rem;
+        }
+
+        .booking-details {
+            text-align: left;
+            margin-top: 1rem;
+            margin-bottom: 1.5rem;
+            font-size: 1.1rem;
+            color: #333;
+        }
+
+        .booking-details p {
+            margin: 0.5rem 0;
+        }
+
+        .note-screenshot {
+            margin-top: 1.5rem;
+            font-size: 0.9rem;
+            color: #555;
+            font-style: italic;
+        }
+
+        .note-screenshot .warning {
+            color: #b91c1c;
+            font-weight: bold;
+        }
+
+        /* Removed .book-another-button styles as button is removed */
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        @media (max-width: 480px) {
+          .card {
+            padding: 1.5rem;
+          }
+          .title {
+            font-size: 1.5rem;
+          }
+          .confirmation-card .title {
+            font-size: 1.8rem;
+          }
+        }
+      `}</style>
     </div>
   );
-}
+};
 
 export default Dashboard;

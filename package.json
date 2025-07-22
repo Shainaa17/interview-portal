@@ -24,7 +24,11 @@
     "extends": [
       "react-app",
       "react-app/jest"
-    ]
+    ],
+    "parserOptions": {
+      "ecmaVersion": 2022,    
+      "sourceType": "module" 
+    }
   },
   "browserslist": {
     "production": [

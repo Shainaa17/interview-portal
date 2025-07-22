@@ -1,20 +1,27 @@
 import React, { useEffect, useState } from "react";
-import { db } from "../firebase/config"; // Ensure this path is correct
-import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
-import "../App.css"; // Ensure you have this file for your CSS
+import { db } from "../firebase/config";
+import { useLocation } from 'react-router-dom';
+import { collection, getDocs, doc, updateDoc, getDoc, arrayUnion, addDoc, query, where } from "firebase/firestore";
+import "../App.css";
 
 const Dashboard = () => {
   const [currentDayIndex, setCurrentDayIndex] = useState(0);
   const [allIndividualSlotsData, setAllIndividualSlotsData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [bookingMessage, setBookingMessage] = useState("");
-  // New state to control showing the confirmation card
   const [showConfirmationCard, setShowConfirmationCard] = useState(false);
-  // New state to store details for the confirmation card
   const [bookedSlotDetails, setBookedSlotDetails] = useState(null);
+  const [hasUserBookedAnySlot, setHasUserBookedAnySlot] = useState(false);
+
+  const location = useLocation();
+  const userEmail = location.state?.email;
+
+  // ✅ LOG: See the user email when Dashboard loads
+  console.log("Dashboard Loaded. Current User Email:", userEmail);
+  console.log("Initial hasUserBookedAnySlot state:", hasUserBookedAnySlot);
+
 
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-  // This array MUST EXACTLY match the 'time' strings in your Firebase documents
   const slotTimings = ["5:30-6:00", "6:00-6:30", "6:30-7:00", "7:00-7:30", "7:30-8:00", "8:00-8:30"];
 
   const fetchAllSlots = async () => {
@@ -28,7 +35,6 @@ const Dashboard = () => {
       }));
       setAllIndividualSlotsData(slots);
       setLoading(false);
-      // console.log("Fetched all slots data:", slots); // Debug log
     } catch (error) {
       console.error("Error fetching slots:", error);
       setLoading(false);
@@ -39,6 +45,38 @@ const Dashboard = () => {
   useEffect(() => {
     fetchAllSlots();
   }, []);
+
+  useEffect(() => {
+    if (userEmail) { // Only run this check if userEmail is available
+      const checkIfAlreadyBookedAnySlot = async () => {
+        // ✅ LOG: Confirm check is running for this email
+        console.log("Running global booking check for:", userEmail);
+        try {
+          const bookingsRef = collection(db, "bookings");
+          const q = query(bookingsRef, where("uid", "==", userEmail));
+          const querySnapshot = await getDocs(q);
+
+          if (!querySnapshot.empty) {
+            // ✅ LOG: Confirm if a booking was found
+            console.log(`Booking found for ${userEmail}! Setting hasUserBookedAnySlot to true.`);
+            setHasUserBookedAnySlot(true);
+            setBookingMessage("You have already booked one slot. Only one booking per user is allowed.");
+          } else {
+            // ✅ LOG: Confirm no booking was found
+            console.log(`No existing booking found for ${userEmail}.`);
+            setHasUserBookedAnySlot(false); // Ensure it's false if no booking found
+          }
+        } catch (error) {
+          console.error("Error checking for existing user bookings:", error);
+          setBookingMessage("Error checking previous bookings.");
+        }
+      };
+      checkIfAlreadyBookedAnySlot();
+    } else {
+        // ✅ LOG: User email not available
+        console.log("User email not available, skipping global booking check.");
+    }
+  }, [userEmail]); // Re-run this effect if userEmail changes
 
   const handlePrevious = () => {
     setCurrentDayIndex((prev) => (prev > 0 ? prev - 1 : days.length - 1));
@@ -56,64 +94,116 @@ const Dashboard = () => {
     (slot) => slot.day === currentDay
   );
 
-  const handleBookSlot = async (slotDocId, time, currentSeatsLeft) => {
-    if (currentSeatsLeft <= 0) {
-      setBookingMessage("No seats available for this slot.");
+  const handleBookSlot = async (slotId, slotTimeForDisplay) => {
+    // ✅ LOG: Check hasUserBookedAnySlot value at the start of booking attempt
+    console.log("handleBookSlot called. hasUserBookedAnySlot at start:", hasUserBookedAnySlot);
+
+    if (!userEmail) {
+      alert("Error: Your email could not be retrieved. Please try logging in again.");
+      setBookingMessage("Booking failed: User email not found.");
       return;
     }
 
-    const confirmBooking = window.confirm(
-      `Are you sure you want to book the ${time} slot on ${currentDay}?`
-    );
-
-    if (!confirmBooking) {
+    if (hasUserBookedAnySlot) {
+      // ✅ LOG: Confirm if booking is being prevented
+      console.log("Booking prevented: User already has a slot globally.");
+      setBookingMessage("You have already booked a slot. Only one booking per user is allowed.");
       return;
     }
 
-    setBookingMessage("Booking your slot...");
+    setBookingMessage("Checking slot availability...");
 
     try {
-      const slotDocRef = doc(db, "slots", slotDocId);
-      const newSeatCount = currentSeatsLeft - 1;
+      const slotDocRef = doc(db, "slots", slotId);
+      const slotSnapshot = await getDoc(slotDocRef);
+
+      if (!slotSnapshot.exists()) {
+        alert("Slot does not exist.");
+        setBookingMessage("Booking failed: Slot not found.");
+        return;
+      }
+
+      const slotData = slotSnapshot.data();
+      const currentSeatsLeft = slotData.seatsLeft;
+      const bookedByArray = slotData.bookedBy || [];
+
+      const alreadyBookedThisSpecificSlot = bookedByArray.includes(userEmail);
+
+      if (alreadyBookedThisSpecificSlot) {
+        alert(`You (${userEmail}) have already booked this specific slot.`);
+        setBookingMessage("Booking failed: Already booked this specific slot by you.");
+        return;
+      }
+
+      if (currentSeatsLeft <= 0) {
+        alert("No seats left for this slot.");
+        setBookingMessage("Booking failed: No seats available.");
+        return;
+      }
+
+      const confirmBooking = window.confirm(
+        `Are you sure you want to book the ${slotTimeForDisplay} slot on ${currentDay} for ${userEmail}?`
+      );
+
+      if (!confirmBooking) {
+        setBookingMessage("Booking cancelled by user.");
+        return;
+      }
+
+      setBookingMessage("Booking your slot...");
+
+      const newSeatsLeft = currentSeatsLeft - 1;
 
       await updateDoc(slotDocRef, {
-        seatsLeft: newSeatCount,
-        // You might add bookedBy: "user_id_here" if you have user authentication
+        seatsLeft: newSeatsLeft,
+        bookedBy: arrayUnion(userEmail),
+      });
+
+      await addDoc(collection(db, "bookings"), {
+        uid: userEmail,
+        day: currentDay,
+        time: slotTimeForDisplay,
+        slotId: slotId,
+        bookedAt: new Date(),
       });
 
       setAllIndividualSlotsData((prevSlotsData) =>
         prevSlotsData.map((slot) =>
-          slot.id === slotDocId
-            ? { ...slot, seatsLeft: newSeatCount }
+          slot.id === slotId
+            ? {
+                ...slot,
+                seatsLeft: newSeatsLeft,
+                bookedBy: [...new Set([...bookedByArray, userEmail])]
+              }
             : slot
         )
       );
 
-      // Successfully booked: Set details for confirmation card and show it
+      // ✅ Set hasUserBookedAnySlot to true AFTER a successful booking
+      console.log("Booking successful. Setting hasUserBookedAnySlot to true.");
+      setHasUserBookedAnySlot(true);
+
       setBookedSlotDetails({
         day: currentDay,
-        time: time,
-        seatsRemaining: newSeatCount, // Seats remaining in that slot
-        // You can add more details here if available, e.g., user name, booking ID
+        time: slotTimeForDisplay,
+        seatsRemaining: newSeatsLeft,
+        email: userEmail,
       });
-      setShowConfirmationCard(true); // Show the confirmation card
-      setBookingMessage(""); // Clear general booking message
+
+      setShowConfirmationCard(true);
+      setBookingMessage("");
 
     } catch (error) {
       console.error("Error booking slot:", error);
-      setBookingMessage("Error booking slot. Please try again.");
-      setBookedSlotDetails(null); // Clear details if booking failed
-      setShowConfirmationCard(false); // Make sure confirmation card is not shown
+      alert("An error occurred while booking the slot. Please try again.");
+      setBookingMessage("Error booking slot. Please check console.");
+      setBookedSlotDetails(null);
+      setShowConfirmationCard(false);
     }
   };
 
-  // Removed handleBookAnotherSlot function as it's not needed for the confirmation card
-  // if the user can't go back.
-
-  // --- Confirmation Card Component ---
-  const ConfirmationCard = ({ details }) => { // onBookAnother prop removed
-    if (!details) return null; // Don't render if no details
-
+  const ConfirmationCard = ({ details }) => {
+    if (!details) return null;
     return (
       <div className="card confirmation-card">
         <h2 className="title">Booking Confirmed!</h2>
@@ -122,27 +212,24 @@ const Dashboard = () => {
           <p><strong>Date:</strong> {details.day}</p>
           <p><strong>Time:</strong> {details.time}</p>
           <p><strong>Seats Remaining:</strong> {details.seatsRemaining}</p>
+          {details.email && <p><strong>Booked By:</strong> {details.email}</p>}
         </div>
         <p className="note-screenshot">
           <span className="warning">⚠️ Note:</span> Please take a screenshot of this confirmation for your records.
         </p>
-        {/* "Book Another Slot" button removed as per requirement */}
       </div>
     );
   };
 
-  // --- Main Dashboard Render ---
   return (
     <div className="container">
-      {/* Conditional rendering based on showConfirmationCard state */}
       {showConfirmationCard ? (
-        <ConfirmationCard details={bookedSlotDetails} /> // onBookAnother prop removed
+        <ConfirmationCard details={bookedSlotDetails} />
       ) : (
-        <> {/* Fragment for multiple elements */}
+        <>
           <h1 className="title">Please Book Your Interview Slot</h1>
           <div className="card">
             <div className="card-header">
-              {/* Keep navigation buttons */}
               <button onClick={handlePrevious}>&larr;</button>
               <h2>{currentDay}</h2>
               <button onClick={handleNext}>&rarr;</button>
@@ -162,6 +249,12 @@ const Dashboard = () => {
                   const seatsAvailable = specificSlot ? specificSlot.seatsLeft : "N/A";
                   const isBookedOut = seatsAvailable === 0;
 
+                  // ✅ LOG: Check button state logic
+                  const disableButton = isBookedOut || !specificSlot || seatsAvailable === "N/A" || hasUserBookedAnySlot;
+                  const buttonText = isBookedOut ? "Booked Out" : (hasUserBookedAnySlot ? "Already Booked" : "Book Now");
+                  console.log(`Slot: ${time}, hasUserBookedAnySlot: ${hasUserBookedAnySlot}, disableButton: ${disableButton}, buttonText: ${buttonText}`);
+
+
                   return (
                     <div
                       className={`slot ${isBookedOut ? "booked-out" : ""}`}
@@ -171,16 +264,12 @@ const Dashboard = () => {
                       <span>{seatsAvailable} seats</span>
                       <button
                         onClick={() =>
-                          handleBookSlot(
-                            specificSlot?.id,
-                            time,
-                            seatsAvailable
-                          )
+                          specificSlot?.id && handleBookSlot(specificSlot.id, time)
                         }
-                        disabled={isBookedOut || !specificSlot || seatsAvailable === "N/A"}
+                        disabled={disableButton}
                         className="book-button"
                       >
-                        {isBookedOut ? "Booked Out" : "Book Now"}
+                        {buttonText}
                       </button>
                     </div>
                   );
@@ -195,7 +284,7 @@ const Dashboard = () => {
         </>
       )}
 
-      {/* Inline styles. Consider moving these to App.css for better separation of concerns. */}
+      {/* Inline styles */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&display=swap');
 
@@ -225,12 +314,12 @@ const Dashboard = () => {
           max-width: 400px;
           width: 100%;
           animation: fadeIn 0.5s ease-in-out;
-          text-align: center; /* Center content in the card */
+          text-align: center;
         }
 
         .card-header {
           display: flex;
-          justify-content: space-between; /* Keep spacing for navigation buttons */
+          justify-content: space-between;
           align-items: center;
           margin-bottom: 1rem;
         }
@@ -273,7 +362,7 @@ const Dashboard = () => {
         }
 
         .slot.booked-out {
-            background: #fecaca; /* Light red for booked out slots */
+            background: #fecaca;
             color: #b91c1c;
         }
 
@@ -282,7 +371,7 @@ const Dashboard = () => {
         }
 
         .book-button {
-            background: #22c55e; /* Green for book button */
+            background: #22c55e;
             color: white;
             border: none;
             padding: 0.5rem 1rem;
@@ -293,11 +382,11 @@ const Dashboard = () => {
         }
 
         .book-button:hover:not(:disabled) {
-            background: #16a34a; /* Darker green on hover */
+            background: #16a34a;
         }
 
         .book-button:disabled {
-            background: #9ca3af; /* Grey for disabled button */
+            background: #9ca3af;
             cursor: not-allowed;
         }
 
@@ -318,17 +407,16 @@ const Dashboard = () => {
             color: #1e3a8a;
         }
 
-        /* Styles for the new confirmation card */
         .confirmation-card {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 300px; /* Give it some height */
+            min-height: 300px;
         }
 
         .confirmation-card .title {
-            color: #22c55e; /* Green for success */
+            color: #22c55e;
             font-size: 2.2rem;
             margin-bottom: 1rem;
         }
@@ -356,8 +444,6 @@ const Dashboard = () => {
             color: #b91c1c;
             font-weight: bold;
         }
-
-        /* Removed .book-another-button styles as button is removed */
 
         @keyframes fadeIn {
           from {

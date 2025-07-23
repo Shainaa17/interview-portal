@@ -3,10 +3,13 @@ import React, { useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useNavigate } from 'react-router-dom';
+import isteLogo from '../ISTE Thapar Chapter Logo blue.png';  // image in base (src/) folder
 
 function Login() {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
+  const [isHover, setIsHover] = useState(false); // hover state for button
+  const [isFocused, setIsFocused] = useState(false); // focus state for input
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
@@ -33,9 +36,18 @@ function Login() {
 
   return (
     <div style={styles.container}>
+      {/* Logo image outside the card */}
+      <img src={isteLogo} alt="ISTE Thapar Chapter Logo" style={styles.image} />
+
+      {/* Congratulations heading outside the card */}
+      <h2 style={{ textAlign: 'center', marginTop: '10px', marginBottom: '30px', fontFamily: 'sans-serif' }}>
+        🎉 Congratulations on clearing the test!
+      </h2>
+
       <div style={styles.card}>
-        <h2>🎉 Congratulations on clearing the test!</h2>
-        <p style={{ marginBottom: '20px' }}>Let’s move to the next round now.</p>
+        <h3 style={{ marginBottom: '25px', marginTop: '-5px' }}>
+          Let’s move to the next round now.
+        </h3>
         <form onSubmit={handleLogin}>
           <input
             type="email"
@@ -43,9 +55,28 @@ function Login() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            style={styles.input}
+            style={{
+              ...styles.input,
+              borderColor: isFocused ? '#2712beff' : '#ccc',
+              boxShadow: isFocused ? '0 0 5px #1e17d5ff' : 'none',
+              transition: 'border-color 0.3s ease, box-shadow 0.3s ease',
+              outline: 'none'
+            }}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
           />
-          <button type="submit" style={styles.button}>Login</button>
+          <button
+            type="submit"
+            style={{
+              ...styles.button,
+              backgroundColor: isHover ? '#1827caff' : '#4CAF50',
+              transition: 'background-color 0.3s ease',
+            }}
+            onMouseEnter={() => setIsHover(true)}
+            onMouseLeave={() => setIsHover(false)}
+          >
+            Login
+          </button>
         </form>
         {error && <p style={styles.error}>{error}</p>}
       </div>
@@ -58,9 +89,16 @@ const styles = {
     minHeight: '100vh',
     backgroundColor: '#f3f3ff',
     display: 'flex',
+    flexDirection: 'column',  // stack vertically
     justifyContent: 'center',
     alignItems: 'center',
     fontFamily: 'sans-serif'
+  },
+  image: {
+    width: '200px',
+    marginBottom: '20px',
+    borderRadius: '10px',
+    objectFit: 'contain',
   },
   card: {
     backgroundColor: '#fff',
@@ -73,11 +111,12 @@ const styles = {
   },
   input: {
     width: '100%',
-    padding: '12px',
+    padding: '12px 16px',
     fontSize: '16px',
     marginBottom: '10px',
     borderRadius: '6px',
-    border: '1px solid #ccc'
+    border: '1px solid #ccc',
+    boxSizing: 'border-box'
   },
   button: {
     padding: '10px 20px',
